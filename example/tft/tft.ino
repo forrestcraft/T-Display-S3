@@ -3,7 +3,61 @@
 #include "img_logo.h"
 #include "pin_config.h"
 #include "s8_uart.h"
+#include <WiFi.h>
+#include <PubSubClient.h>
 
+#define WIFI_SSID "Jonesmo"
+#define WIFI_PASSWORD "Rossydog11"
+#define MQTT_HOST "192.168.68.132"
+#define MQTT_PORT 1883
+
+#define MQTT_TOPIC_RECV "sensor/co2_1/received" // MQTT topic to publish received IR codes
+#define MQTT_TOPIC_SEND "sensor/co2_1/send" // MQTT topic to subscribe for sending IR codes
+void callback(char* topic, byte* payload, unsigned int length) {}
+
+WiFiClient espClient;
+PubSubClient client(MQTT_HOST, MQTT_PORT, callback, espClient);
+void setup_wifi() {
+  delay(10);
+  // We start by connecting to a WiFi network
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  randomSeed(micros());
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+
+}
+
+long lastReconnectAttempt = 0;
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Create a random client ID
+    // String clientId = c;
+    // clientId += String(random(0xffff), HEX);
+    // Attempt to connect
+    if (client.connect("co2_1", "homeassistant", "Ohlighu3zeerieyo8Ual6uephu2quoh2saache0aet3reexee3oogh5iehuPhoh4")) {
+      Serial.println("connected");
+      client.subscribe(MQTT_TOPIC_RECV);
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
 
 /* BEGIN CONFIGURATION */
 #define DEBUG_BAUDRATE 115200
@@ -37,7 +91,7 @@ S8_sensor sensor;
 #define LCD_MODULE_CMD_1
 
 TFT_eSPI tft = TFT_eSPI();
-#define WAIT 1000
+#define WAIT 10000
 unsigned long targetTime = 0; // Used for testing draw times
 
 #if defined(LCD_MODULE_CMD_1)
@@ -67,56 +121,60 @@ lcd_cmd_t lcd_st7789v[] = {
 
 void setup()
 {
-    pinMode(PIN_POWER_ON, OUTPUT);
-    digitalWrite(PIN_POWER_ON, HIGH);
+  setup_wifi();
+  client.setServer(MQTT_HOST, 1883);
+  client.setCallback(callback);
 
-    Serial.begin(115200);
-          // Wait port is open or timeout
-    // int i = 0;
-    // while (!Serial && i < 50) {
-    //     delay(10);
-    //     i++;
-    // }
-    
-    // First message, we are alive
-    Serial.println("");
-    Serial.println("Init");
-        // Initialize S8 sensor
-    S8_serial.begin(S8_BAUDRATE, SERIAL_8N2, S8_RX_PIN, S8_TX_PIN, false);
-    sensor_S8 = new S8_UART(S8_serial);
+  pinMode(PIN_POWER_ON, OUTPUT);
+  digitalWrite(PIN_POWER_ON, HIGH);
 
-    // Check if S8 is available
-    sensor_S8->get_firmware_version(sensor.firm_version);
-    int len = strlen(sensor.firm_version);
-    // if (len == 0) {
-    //     Serial.println("SenseAir S8 CO2 sensor not found!");
-    //     while (1) { delay(1); };
-    // }
+  Serial.begin(115200);
+        // Wait port is open or timeout
+  // int i = 0;
+  // while (!Serial && i < 50) {
+  //     delay(10);
+  //     i++;
+  // }
+  
+  // First message, we are alive
+  // Serial.println("");
+  // Serial.println("Init");
+      // Initialize S8 sensor
+  S8_serial.begin(S8_BAUDRATE, SERIAL_8N2, S8_RX_PIN, S8_TX_PIN, false);
+  sensor_S8 = new S8_UART(S8_serial);
 
-    // Show basic S8 sensor info
-    Serial.println(">>> SenseAir S8 NDIR CO2 sensor <<<");
-    printf("Firmware version: %s\n", sensor.firm_version);
-    sensor.sensor_id = sensor_S8->get_sensor_ID();
-    Serial.print("Sensor ID: 0x"); printIntToHex(sensor.sensor_id, 4); Serial.println("");
+  // Check if S8 is available
+  sensor_S8->get_firmware_version(sensor.firm_version);
+  int len = strlen(sensor.firm_version);
+  // if (len == 0) {
+  //     Serial.println("SenseAir S8 CO2 sensor not found!");
+  //     while (1) { delay(1); };
+  // }
 
-    Serial.println("Setup done!");
-    Serial.flush();
-    Serial.println("Hello T-Display-S3");
+  // Show basic S8 sensor info
+  // Serial.println(">>> SenseAir S8 NDIR CO2 sensor <<<");
+  // printf("Firmware version: %s\n", sensor.firm_version);
+  // sensor.sensor_id = sensor_S8->get_sensor_ID();
+  // Serial.print("Sensor ID: 0x"); printIntToHex(sensor.sensor_id, 4); Serial.println("");
 
-    tft.begin();
+  // Serial.println("Setup done!");
+  // Serial.flush();
+  // Serial.println("Hello T-Display-S3");
 
-#if defined(LCD_MODULE_CMD_1)
-    for (uint8_t i = 0; i < (sizeof(lcd_st7789v) / sizeof(lcd_cmd_t)); i++) {
-        tft.writecommand(lcd_st7789v[i].cmd);
-        for (int j = 0; j < lcd_st7789v[i].len & 0x7f; j++) {
-            tft.writedata(lcd_st7789v[i].data[j]);
-        }
+  tft.begin();
 
-        if (lcd_st7789v[i].len & 0x80) {
-            delay(120);
-        }
-    }
-#endif
+// #if defined(LCD_MODULE_CMD_1)
+//     for (uint8_t i = 0; i < (sizeof(lcd_st7789v) / sizeof(lcd_cmd_t)); i++) {
+//         tft.writecommand(lcd_st7789v[i].cmd);
+//         for (int j = 0; j < lcd_st7789v[i].len & 0x7f; j++) {
+//             tft.writedata(lcd_st7789v[i].data[j]);
+//         }
+
+//         if (lcd_st7789v[i].len & 0x80) {
+//             delay(120);
+//         }
+//     }
+// #endif
 
     tft.setRotation(3);
     tft.setSwapBytes(true);
@@ -128,15 +186,34 @@ void setup()
     ledcWrite(0, 255);
 
     tft.fillScreen(TFT_BLACK);
-    tft.setTextColor(TFT_RED, TFT_BLACK);
+    tft.setFreeFont(&FreeMono24pt7b);
 }
+char data[80];
 
 void loop()
 {
-    targetTime = millis();
-    // Get CO2 measure
-    sensor.co2 = sensor_S8->get_co2();
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
+  targetTime = millis();
 
-    tft.drawString(String(sensor.co2), 0, 0, 6);
-    delay(WAIT);
+  // Get CO2 measure
+  sensor.co2 = sensor_S8->get_co2();
+  if (sensor.co2<500)
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+  else if (sensor.co2<900)
+    tft.setTextColor(TFT_BLUE, TFT_BLACK);
+  else if (sensor.co2<1200)
+    tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+  else 
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+  String co2_str = String(sensor.co2) + "     ";
+
+  String payload = "{ \"ppm\": " + String(sensor.co2) + ",}";
+  payload.toCharArray(data, (payload.length() + 1));
+  client.publish(MQTT_TOPIC_SEND, data);
+
+  tft.drawString((co2_str), 0, 0, 8);
+  delay(WAIT);
 }
