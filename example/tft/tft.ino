@@ -5,6 +5,7 @@
 #include "s8_uart.h"
 #include <WiFi.h>
 #include <PubSubClient.h>
+#include <PMserial.h>
 
 #define WIFI_SSID "Jonesmo"
 #define WIFI_PASSWORD "Rossydog11"
@@ -73,6 +74,7 @@ void reconnect() {
 
 
 #ifdef USE_SOFTWARE_SERIAL
+  SerialPM pms(PMSx003, 17,18); // PMSx003, UART
   HardwareSerial S8_serial(0);
 #else
   #if defined(ARDUINO_ARCH_RP2040)
@@ -119,6 +121,69 @@ lcd_cmd_t lcd_st7789v[] = {
 };
 #endif
 
+void printPMS()
+{
+#if defined(ESP8266) || defined(ESP8266)
+  if (!pms.has_particulate_matter())
+    return;
+  Serial.printf("PM1.0 %2d, PM2.5 %2d, PM10 %2d [ug/m3]\n",
+                pms.pm01, pms.pm25, pms.pm10);
+
+  if (!pms.has_number_concentration())
+    return;
+  Serial.printf("N0.3 %4d, N0.5 %3d, N1.0 %2d, N2.5 %2d, N5.0 %2d, N10 %2d [#/100cc]\n",
+                pms.n0p3, pms.n0p5, pms.n1p0, pms.n2p5, pms.n5p0, pms.n10p0);
+
+  if (!pms.has_temperature_humidity() && !pms.has_formaldehyde())
+    return;
+  Serial.printf("%5.1f °C, %5.1f %%rh, %5.2f mg/m3 HCHO\n",
+                pms.temp, pms.rhum, pms.hcho);
+#else
+  if (!pms.has_particulate_matter())
+    return;
+  Serial.print(F("PM1.0 "));
+  Serial.print(pms.pm01);
+  Serial.print(F(", "));
+  Serial.print(F("PM2.5 "));
+  Serial.print(pms.pm25);
+  Serial.print(F(", "));
+  Serial.print(F("PM10 "));
+  Serial.print(pms.pm10);
+  Serial.println(F(" [ug/m3]"));
+
+  if (!pms.has_number_concentration())
+    return;
+  Serial.print(F("N0.3 "));
+  Serial.print(pms.n0p3);
+  Serial.print(F(", "));
+  Serial.print(F("N0.5 "));
+  Serial.print(pms.n0p5);
+  Serial.print(F(", "));
+  Serial.print(F("N1.0 "));
+  Serial.print(pms.n1p0);
+  Serial.print(F(", "));
+  Serial.print(F("N2.5 "));
+  Serial.print(pms.n2p5);
+  Serial.print(F(", "));
+  Serial.print(F("N5.0 "));
+  Serial.print(pms.n5p0);
+  Serial.print(F(", "));
+  Serial.print(F("N10 "));
+  Serial.print(pms.n10p0);
+  Serial.println(F(" [#/100cc]"));
+
+  if (!pms.has_temperature_humidity() && !pms.has_formaldehyde())
+    return;
+  Serial.print(pms.temp, 1);
+  Serial.print(F(" °C"));
+  Serial.print(F(", "));
+  Serial.print(pms.rhum, 1);
+  Serial.print(F(" %rh"));
+  Serial.print(F(", "));
+  Serial.print(pms.hcho, 2);
+  Serial.println(F(" mg/m3 HCHO"));
+#endif
+}
 void setup()
 {
   setup_wifi();
@@ -142,6 +207,8 @@ void setup()
       // Initialize S8 sensor
   S8_serial.begin(S8_BAUDRATE, SERIAL_8N2, S8_RX_PIN, S8_TX_PIN, false);
   sensor_S8 = new S8_UART(S8_serial);
+  
+  pms.init();
 
   // Check if S8 is available
   sensor_S8->get_firmware_version(sensor.firm_version);
@@ -188,7 +255,7 @@ void setup()
     tft.fillScreen(TFT_BLACK);
     tft.setFreeFont(&FreeMono24pt7b);
 }
-char data[80];
+char data[500];
 
 void loop()
 {
@@ -199,18 +266,28 @@ void loop()
   targetTime = millis();
 
   // Get CO2 measure
+  pms.read();   // read the PM sensor
   sensor.co2 = sensor_S8->get_co2();
-  if (sensor.co2<500)
+  if (sensor.co2<700)
     tft.setTextColor(TFT_GREEN, TFT_BLACK);
-  else if (sensor.co2<900)
+  else if (sensor.co2<1000)
     tft.setTextColor(TFT_BLUE, TFT_BLACK);
-  else if (sensor.co2<1200)
+  else if (sensor.co2<1300)
     tft.setTextColor(TFT_ORANGE, TFT_BLACK);
   else 
     tft.setTextColor(TFT_RED, TFT_BLACK);
   String co2_str = String(sensor.co2) + "     ";
 
-  String payload = "{ \"ppm\": " + String(sensor.co2) + ",}";
+  String payload = "{ \"ppm\": " + String(sensor.co2) + ","+
+    "\"pm1p0\": " + String(pms.pm01) + ","+
+    "\"pm2p5\": " + String(pms.pm25) + ","+
+    "\"pm10\": " + String(pms.pm10) + ","+
+    "\"N0p3\": " + String(pms.n0p3) + ","+
+    "\"N0p5\": " + String(pms.n0p5) + ","+
+    "\"N1p0\": " + String(pms.n1p0) + ","+
+    "\"N2p5\": " + String(pms.n2p5) + ","+
+    "\"N5p0\": " + String(pms.n5p0) + ","+
+    "\"N10p0\": " + String(pms.n10p0) + "}";
   payload.toCharArray(data, (payload.length() + 1));
   client.publish(MQTT_TOPIC_SEND, data);
 
