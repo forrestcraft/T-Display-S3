@@ -1,6 +1,6 @@
-#ifndef USEPLATFORMIO
-#error "This example can only be run on platformIO"
-#endif
+// #ifndef USEPLATFORMIO
+// #error "This example can only be run on platformIO"
+// #endif
 
 /* Please make sure your touch IC model. */
 // #define TOUCH_MODULES_CST_MUTUAL

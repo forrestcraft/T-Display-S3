@@ -2,7 +2,36 @@
 #include "TFT_eSPI.h" /* Please use the TFT library provided in the library. */
 #include "img_logo.h"
 #include "pin_config.h"
+#include "s8_uart.h"
 
+
+/* BEGIN CONFIGURATION */
+#define DEBUG_BAUDRATE 115200
+
+#define USE_SOFTWARE_SERIAL
+#if (defined USE_SOFTWARE_SERIAL || defined ARDUINO_ARCH_RP2040)
+  #define S8_RX_PIN 44         // Rx pin which the S8 Tx pin is attached to (change if it is needed)
+  #define S8_TX_PIN 43         // Tx pin which the S8 Rx pin is attached to (change if it is needed)
+#else
+  #define S8_UART_PORT  0     // Change UART port if it is needed
+#endif
+/* END CONFIGURATION */
+
+
+#ifdef USE_SOFTWARE_SERIAL
+  HardwareSerial S8_serial(0);
+#else
+  #if defined(ARDUINO_ARCH_RP2040)
+    REDIRECT_STDOUT_TO(Serial)    // to use printf (Serial.printf not supported)
+    UART S8_serial(S8_TX_PIN, S8_RX_PIN, NC, NC);
+  #else
+    HardwareSerial S8_serial(S8_UART_PORT);   
+  #endif
+#endif
+
+
+S8_UART *sensor_S8;
+S8_sensor sensor;
 /* The product now has two screens, and the initialization code needs a small change in the new version. The LCD_MODULE_CMD_1 is used to define the
  * switch macro. */
 #define LCD_MODULE_CMD_1
@@ -42,6 +71,36 @@ void setup()
     digitalWrite(PIN_POWER_ON, HIGH);
 
     Serial.begin(115200);
+          // Wait port is open or timeout
+    // int i = 0;
+    // while (!Serial && i < 50) {
+    //     delay(10);
+    //     i++;
+    // }
+    
+    // First message, we are alive
+    Serial.println("");
+    Serial.println("Init");
+        // Initialize S8 sensor
+    S8_serial.begin(S8_BAUDRATE, SERIAL_8N2, S8_RX_PIN, S8_TX_PIN, false);
+    sensor_S8 = new S8_UART(S8_serial);
+
+    // Check if S8 is available
+    sensor_S8->get_firmware_version(sensor.firm_version);
+    int len = strlen(sensor.firm_version);
+    // if (len == 0) {
+    //     Serial.println("SenseAir S8 CO2 sensor not found!");
+    //     while (1) { delay(1); };
+    // }
+
+    // Show basic S8 sensor info
+    Serial.println(">>> SenseAir S8 NDIR CO2 sensor <<<");
+    printf("Firmware version: %s\n", sensor.firm_version);
+    sensor.sensor_id = sensor_S8->get_sensor_ID();
+    Serial.print("Sensor ID: 0x"); printIntToHex(sensor.sensor_id, 4); Serial.println("");
+
+    Serial.println("Setup done!");
+    Serial.flush();
     Serial.println("Hello T-Display-S3");
 
     tft.begin();
@@ -62,166 +121,22 @@ void setup()
     tft.setRotation(3);
     tft.setSwapBytes(true);
     tft.pushImage(0, 0, 320, 170, (uint16_t *)img_logo);
-    delay(2000);
+    delay(1000);
 
     ledcSetup(0, 2000, 8);
     ledcAttachPin(PIN_LCD_BL, 0);
     ledcWrite(0, 255);
+
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_RED, TFT_BLACK);
 }
 
 void loop()
 {
     targetTime = millis();
+    // Get CO2 measure
+    sensor.co2 = sensor_S8->get_co2();
 
-    // First we test them with a background colour set
-    tft.setTextSize(1);
-    tft.fillScreen(TFT_BLACK);
-    tft.setTextColor(TFT_GREEN, TFT_BLACK);
-
-    tft.drawString(" !\"#$%&'()*+,-./0123456", 0, 0, 2);
-    tft.drawString("789:;<=>?@ABCDEFGHIJKL", 0, 16, 2);
-    tft.drawString("MNOPQRSTUVWXYZ[\\]^_`", 0, 32, 2);
-    tft.drawString("abcdefghijklmnopqrstuvw", 0, 48, 2);
-    int xpos = 0;
-    xpos += tft.drawString("xyz{|}~", 0, 64, 2);
-    tft.drawChar(127, xpos, 64, 2);
+    tft.drawString(String(sensor.co2), 0, 0, 6);
     delay(WAIT);
-
-    tft.fillScreen(TFT_BLACK);
-    tft.setTextColor(TFT_GREEN, TFT_BLACK);
-
-    tft.drawString(" !\"#$%&'()*+,-.", 0, 0, 4);
-    tft.drawString("/0123456789:;", 0, 26, 4);
-    tft.drawString("<=>?@ABCDE", 0, 52, 4);
-    tft.drawString("FGHIJKLMNO", 0, 78, 4);
-    tft.drawString("PQRSTUVWX", 0, 104, 4);
-    delay(WAIT);
-
-    tft.fillScreen(TFT_BLACK);
-    tft.drawString("YZ[\\]^_`abc", 0, 0, 4);
-    tft.drawString("defghijklmno", 0, 26, 4);
-    tft.drawString("pqrstuvwxyz", 0, 52, 4);
-    xpos = 0;
-    xpos += tft.drawString("{|}~", 0, 78, 4);
-    tft.drawChar(127, xpos, 78, 4);
-    delay(WAIT);
-
-    tft.fillScreen(TFT_BLACK);
-    tft.setTextColor(TFT_BLUE, TFT_BLACK);
-
-    tft.drawString("012345", 0, 0, 6);
-    tft.drawString("6789", 0, 40, 6);
-    tft.drawString("apm-:.", 0, 80, 6);
-    delay(WAIT);
-
-    tft.fillScreen(TFT_BLACK);
-    tft.setTextColor(TFT_RED, TFT_BLACK);
-
-    tft.drawString("0123", 0, 0, 7);
-    tft.drawString("4567", 0, 60, 7);
-    delay(WAIT);
-
-    tft.fillScreen(TFT_BLACK);
-    tft.drawString("890:.", 0, 0, 7);
-    tft.drawString("", 0, 60, 7);
-    delay(WAIT);
-
-    tft.fillScreen(TFT_BLACK);
-    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-
-    tft.drawString("01", 0, 0, 8);
-    delay(WAIT);
-
-    tft.drawString("23", 0, 0, 8);
-    delay(WAIT);
-
-    tft.drawString("45", 0, 0, 8);
-    delay(WAIT);
-
-    tft.drawString("67", 0, 0, 8);
-    delay(WAIT);
-
-    tft.drawString("89", 0, 0, 8);
-    delay(WAIT);
-
-    tft.drawString("0:.", 0, 0, 8);
-    delay(WAIT);
-
-    tft.setTextColor(TFT_MAGENTA);
-    tft.drawNumber(millis() - targetTime, 0, 100, 4);
-    delay(4000);
-
-    // Now test them with transparent background
-    targetTime = millis();
-
-    tft.setTextSize(1);
-    tft.fillScreen(TFT_BROWN);
-    tft.setTextColor(TFT_GREEN);
-
-    tft.drawString(" !\"#$%&'()*+,-./0123456", 0, 0, 2);
-    tft.drawString("789:;<=>?@ABCDEFGHIJKL", 0, 16, 2);
-    tft.drawString("MNOPQRSTUVWXYZ[\\]^_`", 0, 32, 2);
-    tft.drawString("abcdefghijklmnopqrstuvw", 0, 48, 2);
-    xpos = 0;
-    xpos += tft.drawString("xyz{|}~", 0, 64, 2);
-    tft.drawChar(127, xpos, 64, 2);
-    delay(WAIT);
-
-    tft.fillScreen(TFT_BROWN);
-    tft.setTextColor(TFT_GREEN);
-
-    tft.drawString(" !\"#$%&'()*+,-.", 0, 0, 4);
-    tft.drawString("/0123456789:;", 0, 26, 4);
-    tft.drawString("<=>?@ABCDE", 0, 52, 4);
-    tft.drawString("FGHIJKLMNO", 0, 78, 4);
-    tft.drawString("PQRSTUVWX", 0, 104, 4);
-
-    delay(WAIT);
-    tft.fillScreen(TFT_BROWN);
-    tft.drawString("YZ[\\]^_`abc", 0, 0, 4);
-    tft.drawString("defghijklmno", 0, 26, 4);
-    tft.drawString("pqrstuvwxyz", 0, 52, 4);
-    xpos = 0;
-    xpos += tft.drawString("{|}~", 0, 78, 4);
-    tft.drawChar(127, xpos, 78, 4);
-    delay(WAIT);
-
-    tft.fillScreen(TFT_BROWN);
-    tft.setTextColor(TFT_BLUE);
-
-    tft.drawString("012345", 0, 0, 6);
-    tft.drawString("6789", 0, 40, 6);
-    tft.drawString("apm-:.", 0, 80, 6);
-    delay(WAIT);
-
-    tft.fillScreen(TFT_BROWN);
-    tft.setTextColor(TFT_RED);
-
-    tft.drawString("0123", 0, 0, 7);
-    tft.drawString("4567", 0, 60, 7);
-    delay(WAIT);
-
-    tft.fillScreen(TFT_BROWN);
-    tft.drawString("890:.", 0, 0, 7);
-    tft.drawString("", 0, 60, 7);
-    delay(WAIT);
-
-    tft.fillScreen(TFT_BROWN);
-    tft.setTextColor(TFT_YELLOW);
-
-    tft.drawString("0123", 0, 0, 8);
-    delay(WAIT);
-
-    tft.fillScreen(TFT_BROWN);
-    tft.drawString("4567", 0, 0, 8);
-    delay(WAIT);
-
-    tft.fillScreen(TFT_BROWN);
-    tft.drawString("890:.", 0, 0, 8);
-    delay(WAIT);
-
-    tft.setTextColor(TFT_MAGENTA);
-
-    tft.drawNumber(millis() - targetTime, 0, 100, 4);
-    delay(4000);
 }

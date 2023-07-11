@@ -42,7 +42,7 @@
 //#define RPI_DISPLAY_TYPE // 20MHz maximum SPI
 
 // Only define one driver, the other ones must be commented out
-#define ILI9341_DRIVER       // Generic driver for common displays
+// #define ILI9341_DRIVER       // Generic driver for common displays
 //#define ILI9341_2_DRIVER     // Alternative ILI9341 driver, see https://github.com/Bodmer/TFT_eSPI/issues/1172
 //#define ST7735_DRIVER      // Define additional parameters below for this display
 //#define ILI9163_DRIVER     // Define additional parameters below for this display
@@ -53,7 +53,7 @@
 //#define ILI9486_DRIVER
 //#define ILI9488_DRIVER     // WARNING: Do not connect ILI9488 display SDO to MISO if other devices share the SPI bus (TFT SDO does NOT tristate when CS is high)
 //#define ST7789_DRIVER      // Full configuration option, define additional parameters below for this display
-//#define ST7789_2_DRIVER    // Minimal configuration option, define additional parameters below for this display
+#define ST7789_2_DRIVER    // Minimal configuration option, define additional parameters below for this display
 //#define R61581_DRIVER
 //#define RM68140_DRIVER
 //#define ST7796_DRIVER
@@ -83,12 +83,12 @@
 // For ST7789, ST7735, ILI9163 and GC9A01 ONLY, define the pixel width and height in portrait orientation
 // #define TFT_WIDTH  80
 // #define TFT_WIDTH  128
-// #define TFT_WIDTH  172 // ST7789 172 x 320
+#define TFT_WIDTH  170 // ST7789 172 x 320
 // #define TFT_WIDTH  240 // ST7789 240 x 240 and 240 x 320
 // #define TFT_HEIGHT 160
 // #define TFT_HEIGHT 128
 // #define TFT_HEIGHT 240 // ST7789 240 x 240
-// #define TFT_HEIGHT 320 // ST7789 240 x 320
+#define TFT_HEIGHT 320 // ST7789 240 x 320
 // #define TFT_HEIGHT 240 // GC9A01 240 x 240
 
 // For ST7735 ONLY, define the type of display, originally this was based on the
@@ -171,7 +171,7 @@
 #define TFT_RST  PIN_D4  // Reset pin (could connect to NodeMCU RST, see next line)
 //#define TFT_RST  -1    // Set TFT_RST to -1 if the display RESET is connected to NodeMCU RST or 3.3V
 
-//#define TFT_BL PIN_D1  // LED back-light (only for ST7789 with backlight control pin)
+#define TFT_BL PIN_D38  // LED back-light (only for ST7789 with backlight control pin)
 
 //#define TOUCH_CS PIN_D2     // Chip select pin (T_CS) of touch screen
 
