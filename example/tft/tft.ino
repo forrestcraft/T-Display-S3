@@ -6,6 +6,12 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <PMserial.h>
+#include "time.h"
+
+#define NTP_SERVER  "pool.ntp.org"
+#define GMT_OFFSET_SEC  (-7*3600)
+#define DAYLIGHT_OFFSET_SEC  0
+bool time_ok = false;
 
 #define WIFI_SSID "Jonesmo"
 #define WIFI_PASSWORD "Rossydog11"
@@ -18,36 +24,60 @@ void callback(char* topic, byte* payload, unsigned int length) {}
 
 WiFiClient espClient;
 PubSubClient client(MQTT_HOST, MQTT_PORT, callback, espClient);
-void setup_wifi() {
-  delay(10);
+
+long lastReconnectAttempt = 0;
+void setup_wifi(int timeout = 10000) {
+  unsigned long startAttemptTime = millis();
   // We start by connecting to a WiFi network
   Serial.println();
   Serial.print("Connecting to ");
   Serial.println(WIFI_SSID);
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) {
+  
+  while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < timeout) {
     delay(500);
     Serial.print(".");
   }
+  
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Failed to connect to WiFi within timeout period");
+    return;
+  }
+
   randomSeed(micros());
+  struct tm timeinfo;
+  configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
+  if(!getLocalTime(&timeinfo)){
+    Serial.println("Failed to obtain time");
+  }
+  else  time_ok = true;
+  Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+  
   Serial.println("");
   Serial.println("WiFi connected");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
-
 }
 
-long lastReconnectAttempt = 0;
-void reconnect() {
+void reconnect(int timeout = 10000) {
+  // Call the setup_wifi function
+  setup_wifi(5000);
+  
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Failed to connect to WiFi, exiting...");
+    return;
+  }
+
+  unsigned long startAttemptTime = millis();
   // Loop until we're reconnected
-  while (!client.connected()) {
+  while (!client.connected() && millis() - startAttemptTime < timeout) {
     Serial.print("Attempting MQTT connection...");
     // Create a random client ID
-    // String clientId = c;
-    // clientId += String(random(0xffff), HEX);
+    String clientId = "co2_2";
+    clientId += String(random(0xffff), HEX);
     // Attempt to connect
-    if (client.connect("co2_1", "homeassistant", "Ohlighu3zeerieyo8Ual6uephu2quoh2saache0aet3reexee3oogh5iehuPhoh4")) {
+    if (client.connect(clientId.c_str(), "homeassistant", "Ohlighu3zeerieyo8Ual6uephu2quoh2saache0aet3reexee3oogh5iehuPhoh4")) {
       Serial.println("connected");
       client.subscribe(MQTT_TOPIC_RECV);
     } else {
@@ -58,7 +88,47 @@ void reconnect() {
       delay(5000);
     }
   }
+  
+  if (!client.connected()) {
+    Serial.println("Failed to connect to MQTT within timeout period, exiting...");
+  }
 }
+#define MIN_BRIGHT 1
+#define DEFAULT_BRIGHTNESS 50
+#define MAX_BRIGHT 255
+
+#define SUNRISE_TIME 5.0    // Sunrise at 5 AM
+#define SOLAR_NOON_TIME 13.0 // Solar noon at 1 PM
+#define SUNSET_TIME 20.0    // Sunset at 8 PM
+
+int getBrightness() {
+  if (!time_ok)
+    return DEFAULT_BRIGHTNESS;
+  time_t rawtime;
+  time(&rawtime);
+  struct tm * timeinfo = localtime(&rawtime);
+  float currentHour = timeinfo->tm_hour + timeinfo->tm_min / 60.0 + timeinfo->tm_sec / 3600.0;
+  
+  int brightness = 0;
+  
+  // Morning increase in brightness
+  if (currentHour >= SUNRISE_TIME && currentHour < SOLAR_NOON_TIME) {
+    float progress = (currentHour - SUNRISE_TIME) / (SOLAR_NOON_TIME - SUNRISE_TIME);
+    brightness = MIN_BRIGHT + (MAX_BRIGHT - MIN_BRIGHT) * progress;
+  }
+  // Afternoon decrease in brightness
+  else if (currentHour >= SOLAR_NOON_TIME && currentHour < SUNSET_TIME) {
+    float progress = 1 - ((currentHour - SOLAR_NOON_TIME) / (SUNSET_TIME - SOLAR_NOON_TIME));
+    brightness = MIN_BRIGHT + (MAX_BRIGHT - MIN_BRIGHT) * progress;
+  }
+  // Night time
+  else {
+    brightness = MIN_BRIGHT;
+  }
+
+  return brightness;
+}
+
 
 /* BEGIN CONFIGURATION */
 #define DEBUG_BAUDRATE 115200
@@ -94,7 +164,6 @@ S8_sensor sensor;
 
 TFT_eSPI tft = TFT_eSPI();
 #define WAIT 10000
-unsigned long targetTime = 0; // Used for testing draw times
 
 #if defined(LCD_MODULE_CMD_1)
 typedef struct {
@@ -256,41 +325,92 @@ void setup()
     tft.setFreeFont(&FreeMono24pt7b);
 }
 char data[500];
-
+long last_loop = 0;
 void loop()
 {
-  if (!client.connected()) {
-    reconnect();
+  
+  if (millis()-last_loop>WAIT){
+    last_loop = millis();
+    
+    ledcWrite(0,getBrightness()); /* Screen brightness can be modified by adjusting this parameter. (0-255) */
+
+    // Get CO2 measure
+    pms.read();   // read the PM sensor
+    sensor.co2 = sensor_S8->get_co2();
+    if (sensor.co2<700)
+      tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    else if (sensor.co2<1000)
+      tft.setTextColor(TFT_BLUE, TFT_BLACK);
+    else if (sensor.co2<1300)
+      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+    else 
+      tft.setTextColor(TFT_RED, TFT_BLACK);
+    String co2_str = String(sensor.co2) + "     ";
+
+    tft.drawString((co2_str), 0, 0, 8);
+    if (pms.pm01<10)
+      tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    else if (pms.pm01<50)
+      tft.setTextColor(TFT_BLUE, TFT_BLACK);
+    else if (pms.pm01<100)
+      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+    else 
+      tft.setTextColor(TFT_RED, TFT_BLACK);
+    String part_l1 = 
+      "pm1.0:   " + String(pms.pm01) + " "+
+      "pm2.5: " + String(pms.pm25) + "   ";
+
+    tft.drawString((part_l1), 0, 80, 4);
+    if (pms.pm10<10)
+      tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    else if (pms.pm10<50)
+      tft.setTextColor(TFT_BLUE, TFT_BLACK);
+    else if (pms.pm10<100)
+      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+    else 
+      tft.setTextColor(TFT_RED, TFT_BLACK);
+    String part_l2 = 
+      "pm10: " + String(pms.pm10) +"    ";
+    tft.drawString((part_l2), 0, 100, 4);
+
+    int count_all = pms.n0p3 +pms.n0p5+pms.n1p0+pms.n2p5+pms.n5p0+pms.n10p0;
+    if (count_all<300)
+      tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    else if (count_all<1000)
+      tft.setTextColor(TFT_BLUE, TFT_BLACK);
+    else if (count_all<5000)
+      tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+    else 
+      tft.setTextColor(TFT_RED, TFT_BLACK);
+    String part_l3 = 
+      "N0.3: " + String(pms.n0p3) + " "+
+      "N0.5: " + String(pms.n0p5) + " "+
+      "N1.0: " + String(pms.n1p0) + "    ";
+    String part_l4 = 
+      "N2.5: " + String(pms.n2p5) + " "+
+      "N5.0: " + String(pms.n5p0) + " "+
+      "N10.0: " + String(pms.n10p0)  +"    ";
+
+    tft.drawString((part_l3), 0, 130, 2);
+    tft.drawString((part_l4), 0, 150, 2);
+    if (!client.connected()) {
+      reconnect();
+    }
+    else{
+      String payload = "{ \"ppm\": " + String(sensor.co2) + ","+
+        "\"pm1p0\": " + String(pms.pm01) + ","+
+        "\"pm2p5\": " + String(pms.pm25) + ","+
+        "\"pm10\": " + String(pms.pm10) + ","+
+        "\"N0p3\": " + String(pms.n0p3) + ","+
+        "\"N0p5\": " + String(pms.n0p5) + ","+
+        "\"N1p0\": " + String(pms.n1p0) + ","+
+        "\"N2p5\": " + String(pms.n2p5) + ","+
+        "\"N5p0\": " + String(pms.n5p0) + ","+
+        "\"N10p0\": " + String(pms.n10p0) + "}";
+      payload.toCharArray(data, (payload.length() + 1));
+      client.publish(MQTT_TOPIC_SEND, data);
+
+      client.loop();
+    }
   }
-  client.loop();
-  targetTime = millis();
-
-  // Get CO2 measure
-  pms.read();   // read the PM sensor
-  sensor.co2 = sensor_S8->get_co2();
-  if (sensor.co2<700)
-    tft.setTextColor(TFT_GREEN, TFT_BLACK);
-  else if (sensor.co2<1000)
-    tft.setTextColor(TFT_BLUE, TFT_BLACK);
-  else if (sensor.co2<1300)
-    tft.setTextColor(TFT_ORANGE, TFT_BLACK);
-  else 
-    tft.setTextColor(TFT_RED, TFT_BLACK);
-  String co2_str = String(sensor.co2) + "     ";
-
-  String payload = "{ \"ppm\": " + String(sensor.co2) + ","+
-    "\"pm1p0\": " + String(pms.pm01) + ","+
-    "\"pm2p5\": " + String(pms.pm25) + ","+
-    "\"pm10\": " + String(pms.pm10) + ","+
-    "\"N0p3\": " + String(pms.n0p3) + ","+
-    "\"N0p5\": " + String(pms.n0p5) + ","+
-    "\"N1p0\": " + String(pms.n1p0) + ","+
-    "\"N2p5\": " + String(pms.n2p5) + ","+
-    "\"N5p0\": " + String(pms.n5p0) + ","+
-    "\"N10p0\": " + String(pms.n10p0) + "}";
-  payload.toCharArray(data, (payload.length() + 1));
-  client.publish(MQTT_TOPIC_SEND, data);
-
-  tft.drawString((co2_str), 0, 0, 8);
-  delay(WAIT);
 }
