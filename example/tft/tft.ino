@@ -7,7 +7,12 @@
 #include <PubSubClient.h>
 #include <PMserial.h>
 #include "time.h"
+#include <Wire.h>
+#include <Adafruit_AHTX0.h>
+#include <Adafruit_BMP280.h>
 
+#define I2C_SDA 16
+#define I2C_SCL 21
 #define NTP_SERVER  "pool.ntp.org"
 #define GMT_OFFSET_SEC  (-7*3600)
 #define DAYLIGHT_OFFSET_SEC  0
@@ -25,6 +30,9 @@ void callback(char* topic, byte* payload, unsigned int length) {}
 bool time_ok = false;
 WiFiClient espClient;
 PubSubClient client(MQTT_HOST, MQTT_PORT, callback, espClient);
+
+Adafruit_AHTX0 aht;
+Adafruit_BMP280 bmp;
 
 long lastReconnectAttempt = 0;
 void setup_wifi(int timeout = 10000) {
@@ -94,8 +102,8 @@ void reconnect(int timeout = 10000) {
     Serial.println("Failed to connect to MQTT within timeout period, exiting...");
   }
 }
-#define MIN_BRIGHT 1
-#define DEFAULT_BRIGHTNESS 50
+#define MIN_BRIGHT 100
+#define DEFAULT_BRIGHTNESS 150
 #define MAX_BRIGHT 255
 
 #define SUNRISE_TIME 5.0    // Sunrise at 5 AM
@@ -283,6 +291,22 @@ void setup()
   // Check if S8 is available
   sensor_S8->get_firmware_version(sensor.firm_version);
   int len = strlen(sensor.firm_version);
+  Wire.begin(I2C_SDA, I2C_SCL);
+  if (aht.begin()) {
+    Serial.println("Found AHT20");
+  } else {
+    Serial.println("Didn't find AHT20");
+  }  
+  if (!bmp.begin()) {
+    Serial.println(F("Could not find a valid BMP280 sensor, check wiring or "
+                      "try a different address!"));
+    while (1) delay(10);
+  }
+  bmp.setSampling(Adafruit_BMP280::MODE_FORCED,     /* Operating Mode. */
+                  Adafruit_BMP280::SAMPLING_X2,     /* Temp. oversampling */
+                  Adafruit_BMP280::SAMPLING_X16,    /* Pressure oversampling */
+                  Adafruit_BMP280::FILTER_X16,      /* Filtering. */
+                  Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
   // if (len == 0) {
   //     Serial.println("SenseAir S8 CO2 sensor not found!");
   //     while (1) { delay(1); };
@@ -329,7 +353,9 @@ char data[500];
 long last_loop = 0;
 void loop()
 {
+  sensors_event_t humidity, temp;
   
+ 
   if (millis()-last_loop>MAIN_LOOP_WAIT){
     last_loop = millis();
     
@@ -394,6 +420,12 @@ void loop()
 
     tft.drawString((part_l3), 0, 135, 2);
     tft.drawString((part_l4), 0, 155, 2);
+    bmp.takeForcedMeasurement();
+    aht.getEvent(&humidity, &temp);// populate temp and humidity objects with fresh data
+
+    tft.setTextColor(TFT_PINK, TFT_BLACK);
+    tft.drawString(String(humidity.relative_humidity)+"%", 250, 0, 2);
+    tft.drawString(String((temp.temperature*9/5)+32)+"F", 250, 20, 2);
     if (!client.connected()) {
       reconnect();
     }
@@ -407,7 +439,11 @@ void loop()
         "\"N1p0\": " + String(pms.n1p0) + ","+
         "\"N2p5\": " + String(pms.n2p5) + ","+
         "\"N5p0\": " + String(pms.n5p0) + ","+
-        "\"N10p0\": " + String(pms.n10p0) + "}";
+        "\"N10p0\": " + String(pms.n10p0) + ","+
+        "\"aht_temp\": " + String(temp.temperature) + ","+
+        "\"aht_humidity\": " + String(humidity.relative_humidity) + ","+
+        "\"bmp_pressure\": " + String(bmp.readPressure()) + ","+
+        "\"bmp_temp\": " + String(bmp.readTemperature()) +"}";
       payload.toCharArray(data, (payload.length() + 1));
       client.publish(MQTT_TOPIC_SEND, data);
 
