@@ -11,7 +11,7 @@
 #define NTP_SERVER  "pool.ntp.org"
 #define GMT_OFFSET_SEC  (-7*3600)
 #define DAYLIGHT_OFFSET_SEC  0
-bool time_ok = false;
+#define MAIN_LOOP_WAIT 10000
 
 #define WIFI_SSID "Jonesmo"
 #define WIFI_PASSWORD "Rossydog11"
@@ -22,6 +22,7 @@ bool time_ok = false;
 #define MQTT_TOPIC_SEND "sensor/co2_1/send" // MQTT topic to subscribe for sending IR codes
 void callback(char* topic, byte* payload, unsigned int length) {}
 
+bool time_ok = false;
 WiFiClient espClient;
 PubSubClient client(MQTT_HOST, MQTT_PORT, callback, espClient);
 
@@ -101,6 +102,7 @@ void reconnect(int timeout = 10000) {
 #define SOLAR_NOON_TIME 13.0 // Solar noon at 1 PM
 #define SUNSET_TIME 20.0    // Sunset at 8 PM
 
+
 int getBrightness() {
   if (!time_ok)
     return DEFAULT_BRIGHTNESS;
@@ -163,7 +165,6 @@ S8_sensor sensor;
 #define LCD_MODULE_CMD_1
 
 TFT_eSPI tft = TFT_eSPI();
-#define WAIT 10000
 
 #if defined(LCD_MODULE_CMD_1)
 typedef struct {
@@ -263,7 +264,7 @@ void setup()
   digitalWrite(PIN_POWER_ON, HIGH);
 
   Serial.begin(115200);
-        // Wait port is open or timeout
+  // Wait port is open or timeout
   // int i = 0;
   // while (!Serial && i < 50) {
   //     delay(10);
@@ -329,7 +330,7 @@ long last_loop = 0;
 void loop()
 {
   
-  if (millis()-last_loop>WAIT){
+  if (millis()-last_loop>MAIN_LOOP_WAIT){
     last_loop = millis();
     
     ledcWrite(0,getBrightness()); /* Screen brightness can be modified by adjusting this parameter. (0-255) */
@@ -348,17 +349,17 @@ void loop()
     String co2_str = String(sensor.co2) + "     ";
 
     tft.drawString((co2_str), 0, 0, 8);
-    if (pms.pm01<10)
+    if (pms.pm01+pms.pm25<15)
       tft.setTextColor(TFT_GREEN, TFT_BLACK);
-    else if (pms.pm01<50)
+    else if (pms.pm01+pms.pm25<100)
       tft.setTextColor(TFT_BLUE, TFT_BLACK);
-    else if (pms.pm01<100)
+    else if (pms.pm01+pms.pm25<300)
       tft.setTextColor(TFT_ORANGE, TFT_BLACK);
     else 
       tft.setTextColor(TFT_RED, TFT_BLACK);
     String part_l1 = 
-      "pm1.0:   " + String(pms.pm01) + " "+
-      "pm2.5: " + String(pms.pm25) + "   ";
+      "pm1.0: " + String(pms.pm01) + "     "+
+      "pm2.5: " + String(pms.pm25) + "       ";
 
     tft.drawString((part_l1), 0, 80, 4);
     if (pms.pm10<10)
@@ -370,15 +371,15 @@ void loop()
     else 
       tft.setTextColor(TFT_RED, TFT_BLACK);
     String part_l2 = 
-      "pm10: " + String(pms.pm10) +"    ";
-    tft.drawString((part_l2), 0, 100, 4);
+      "pm10: " + String(pms.pm10) +"         ";
+    tft.drawString((part_l2), 0, 105, 4);
 
     int count_all = pms.n0p3 +pms.n0p5+pms.n1p0+pms.n2p5+pms.n5p0+pms.n10p0;
-    if (count_all<300)
+    if (count_all<400)
       tft.setTextColor(TFT_GREEN, TFT_BLACK);
-    else if (count_all<1000)
-      tft.setTextColor(TFT_BLUE, TFT_BLACK);
     else if (count_all<5000)
+      tft.setTextColor(TFT_BLUE, TFT_BLACK);
+    else if (count_all<20000)
       tft.setTextColor(TFT_ORANGE, TFT_BLACK);
     else 
       tft.setTextColor(TFT_RED, TFT_BLACK);
@@ -391,8 +392,8 @@ void loop()
       "N5.0: " + String(pms.n5p0) + " "+
       "N10.0: " + String(pms.n10p0)  +"    ";
 
-    tft.drawString((part_l3), 0, 130, 2);
-    tft.drawString((part_l4), 0, 150, 2);
+    tft.drawString((part_l3), 0, 135, 2);
+    tft.drawString((part_l4), 0, 155, 2);
     if (!client.connected()) {
       reconnect();
     }
